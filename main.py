@@ -18,8 +18,7 @@ from kivy.network.urlrequest import UrlRequest
 from pytube import YouTube
 
 # --- SETTING SERVER ---
-# Pastikan link ini benar (tetap pakai tanda kutip)
-URL_CONFIG = "https://gist.githubusercontent.com/ytdownloadermhr/..." 
+URL_CONFIG = "https://gist.githubusercontent.com/ytdownloadermhr/..." # Pastikan ini link kamu
 
 # --- KONFIGURASI FILE LOKAL ---
 PATH_DOWNLOAD = "/storage/emulated/0/Download"
@@ -48,11 +47,12 @@ class MainApp(MDApp):
         header.add_widget(MDLabel(text="AutoTube Pro", halign="center", font_style="H5", theme_text_color="Primary"))
         layout.add_widget(header)
         
-        # 2. STATUS ERROR (Penting untuk Debugging)
+        # 2. LABEL ERROR (Untuk Debugging)
         self.error_label = MDLabel(
-            text="Memuat...", 
+            text="Siap", 
             halign="center", 
-            theme_text_color="Error",
+            theme_text_color="Custom",
+            text_color=(0,0,0,0.5),
             font_style="Caption",
             size_hint_y=None,
             height=30
@@ -61,7 +61,7 @@ class MainApp(MDApp):
 
         # 3. TOMBOL KONTROL
         control_box = MDBoxLayout(orientation='vertical', adaptive_height=True, padding=20, spacing=15)
-        self.status_label = MDLabel(text="Menunggu Izin...", halign="center", font_style="Subtitle1")
+        self.status_label = MDLabel(text="Pilih Mode:", halign="center", font_style="Subtitle1")
         
         btn_mp3 = MDFillRoundFlatIconButton(
             text="START AUTO MP3", icon="music-note", 
@@ -96,11 +96,10 @@ class MainApp(MDApp):
         layout.add_widget(scroll)
 
         screen.add_widget(layout)
-        
         return screen
 
     def on_start(self):
-        # --- PERBAIKAN UTAMA: MEMINTA IZIN DI AWAL ---
+        # Meminta Izin Android
         if platform == 'android':
             from android.permissions import request_permissions, Permission
             request_permissions([
@@ -108,42 +107,29 @@ class MainApp(MDApp):
                 Permission.READ_EXTERNAL_STORAGE,
                 Permission.FOREGROUND_SERVICE
             ])
-            
-        # Panggil fungsi lain dengan delay agar tidak crash saat startup
         Clock.schedule_once(self.mulai_aplikasi, 1)
 
     def mulai_aplikasi(self, dt):
         try:
-            # Ambil Config dari Server
-            UrlRequest(URL_CONFIG, on_success=self.update_config_server, on_failure=self.offline_mode, on_error=self.offline_mode)
-            
-            # Jalankan Scheduler
+            UrlRequest(URL_CONFIG, on_success=self.update_config_server)
             Clock.schedule_interval(self.muat_riwayat, 2)
             Clock.schedule_interval(self.cek_antrean_video, 3)
-            self.error_label.text = "Sistem Normal"
-            
         except Exception as e:
-            # Jika ada error, tampilkan di layar HP, JANGAN CRASH
-            self.error_label.text = f"Error: {str(e)}"
+            self.error_label.text = f"Err Start: {str(e)}"
 
     def update_config_server(self, req, result):
-        try:
-            if result.get('status') == 'aktif':
-                self.ad_data = result
-                self.status_label.text = "Siap Digunakan. Pilih Mode:"
-            else:
-                self.status_label.text = "Aplikasi Maintenance"
-        except:
-            self.status_label.text = "Gagal Baca Config"
+        if result.get('status') == 'aktif':
+            self.ad_data = result
+            self.status_label.text = "Siap Digunakan."
 
-    def offline_mode(self, *args):
-        self.status_label.text = "Mode Offline"
-
+    # --- BAGIAN INI YANG KITA PERBAIKI (MENGGUNAKAN INTENT) ---
     def set_mode_service(self, mode):
         try:
+            # 1. Simpan Config Mode
             with open(FILE_CONFIG, 'w') as f:
                 json.dump({"mode": mode}, f)
             
+            # 2. Update Teks UI
             if mode == "mp3":
                 self.status_label.text = "🔥 AUTO MP3 AKTIF"
                 self.status_label.text_color = (0, 1, 0, 1)
@@ -151,18 +137,43 @@ class MainApp(MDApp):
                 self.status_label.text = "🎬 VIDEO MODE AKTIF"
                 self.status_label.text_color = (0, 0, 1, 1)
                 
+            # 3. Jalankan Service dengan INTENT (Cara Baru)
             if platform == 'android':
                 from jnius import autoclass
-                service = autoclass('org.kivy.android.PythonService').mService
-                service.start(None, None, None, None, None)
+                
+                # Mengambil Kelas Activity Utama
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                mActivity = PythonActivity.mActivity
+                Intent = autoclass('android.content.Intent')
+                
+                # Nama Paket Service (PENTING: Harus sesuai buildozer.spec)
+                # org.autotube + autotubepro + ServiceMService (Kivy menambahkan 'Service' + nama file kapital)
+                service_class_name = 'org.autotube.autotubepro.ServiceMService'
+                service_class = autoclass(service_class_name)
+                
+                # Membuat Intent untuk memulai service
+                intent = Intent(mActivity, service_class)
+                
+                # Menambahkan argumen (opsional)
+                intent.putExtra("python_service_argument", "somestring")
+                
+                # Start Service (Foreground)
+                mActivity.startService(intent)
+                
+                self.error_label.text = "Service Berjalan..."
+                
         except Exception as e:
-            self.error_label.text = f"Gagal Start: {e}"
+            # Tampilkan detail error jika gagal lagi
+            self.error_label.text = f"Gagal Service: {e}"
+            print(f"DEBUG ERROR: {e}")
 
     def stop_service(self, *args):
         self.status_label.text = "⛔ Service Berhenti"
         self.status_label.text_color = (0, 0, 0, 1)
+        # Di Android, mematikan service biasanya cukup dengan mematikan app dari recent apps
+        # atau kita bisa mengirim sinyal stop lewat file, tapi untuk sekarang UI saja cukup.
 
-    # --- LOGIKA RIWAYAT, PLAY, DELETE ---
+    # --- FUNGSI PENDUKUNG LAIN (TETAP SAMA) ---
     def muat_riwayat(self, dt):
         if not os.path.exists(FILE_RIWAYAT): return
         try:
@@ -199,7 +210,6 @@ class MainApp(MDApp):
             self.history_list.clear_widgets()
         except: pass
 
-    # --- LOGIKA VIDEO DOWNLOAD ---
     def cek_antrean_video(self, dt):
         if os.path.exists(FILE_PENDING):
             try:
@@ -222,13 +232,11 @@ class MainApp(MDApp):
             Clock.schedule_once(lambda x: self.buka_popup_pilihan(yt, res720, res360), 0)
         except Exception as e:
             Clock.schedule_once(lambda x: self.loading_dialog.dismiss(), 0)
-            # Tampilkan error di label
             Clock.schedule_once(lambda x: setattr(self.error_label, 'text', f"Err YT: {str(e)}"), 0)
 
     def buka_popup_pilihan(self, yt, s720, s360):
         self.loading_dialog.dismiss()
         box = MDBoxLayout(orientation="vertical", spacing=10, size_hint_y=None, height=180)
-        
         if s720:
             box.add_widget(MDFillRoundFlatButton(
                 text=f"HD 720p ({s720.filesize_mb:.1f}MB)", pos_hint={'center_x': 0.5}, md_bg_color=(0,0.7,0,1),
@@ -237,7 +245,6 @@ class MainApp(MDApp):
             box.add_widget(MDFlatButton(
                 text=f"SD 360p ({s360.filesize_mb:.1f}MB)", pos_hint={'center_x': 0.5},
                 on_release=lambda x: self.mulai_download_foreground(s360, yt.title, "360p")))
-            
         self.dialog_pilihan = MDDialog(title=f"Download: {yt.title[:20]}...", type="custom", content_cls=box)
         self.dialog_pilihan.open()
 
@@ -265,7 +272,6 @@ class MainApp(MDApp):
                 with open(FILE_RIWAYAT, 'r') as f: list_data = json.load(f)
             list_data.append(data_baru)
             with open(FILE_RIWAYAT, 'w') as f: json.dump(list_data, f)
-            
             Clock.schedule_once(lambda x: self.progress_dialog.dismiss(), 0)
         except Exception as e:
             Clock.schedule_once(lambda x: self.progress_dialog.dismiss(), 0)
