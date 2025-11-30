@@ -20,14 +20,16 @@ from kivy.network.urlrequest import UrlRequest
 from pytube import YouTube
 
 # --- CONFIG SERVER ---
-URL_CONFIG = "https://gist.githubusercontent.com/ytdownloadermhr/..." # Pastikan link Gist kamu benar
+URL_CONFIG = "https://gist.githubusercontent.com/ytdownloadermhr/..." # Pastikan link benar
 
 # --- FUNGSI PATH ---
 def dapatkan_path_private():
     if platform == 'android':
-        from jnius import autoclass
-        PythonActivity = autoclass('org.kivy.android.PythonActivity')
-        return PythonActivity.mActivity.getExternalFilesDir(None).getAbsolutePath()
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            return PythonActivity.mActivity.getExternalFilesDir(None).getAbsolutePath()
+        except: return "."
     return "." 
 
 PATH_DOWNLOAD = "/storage/emulated/0/Download" 
@@ -59,13 +61,11 @@ class MainApp(MDApp):
         # 2. Status / Input Manual
         input_box = MDBoxLayout(orientation='vertical', adaptive_height=True, padding=20, spacing=10)
         
-        # Kolom Input Link (Cadangan Manual)
         self.input_link = MDTextField(
             hint_text="Tempel Link YouTube Disini...",
             mode="rectangle"
         )
         
-        # Tombol Download Manual
         btn_manual = MDRaisedButton(
             text="DOWNLOAD MANUAL",
             size_hint_x=1,
@@ -93,43 +93,66 @@ class MainApp(MDApp):
 
         screen.add_widget(layout)
         
-        # Binding: Saat aplikasi dibuka kembali (Resume), cek clipboard
+        # BINDING PENTING
         Window.bind(on_resume=self.cek_clipboard_otomatis)
         
         return screen
 
     def on_start(self):
-        # Minta Izin Penyimpanan
         if platform == 'android':
             from android.permissions import request_permissions, Permission
             request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE])
-        
         Clock.schedule_once(self.setup_awal, 1)
 
     def setup_awal(self, dt):
-        UrlRequest(URL_CONFIG, on_success=self.dummy_update) # Cek server background
+        UrlRequest(URL_CONFIG, on_success=self.dummy_update)
         Clock.schedule_interval(self.muat_riwayat, 2)
-        # Langsung cek clipboard saat pertama buka
-        self.cek_clipboard_otomatis()
+        # Cek clipboard dengan delay sedikit agar UI siap dulu
+        Clock.schedule_once(self.cek_clipboard_otomatis, 1)
 
     def dummy_update(self, req, result):
         pass
 
-    # --- FITUR UTAMA: CEK CLIPBOARD SAAT APLIKASI DIBUKA ---
-    def cek_clipboard_otomatis(self, *args):
-        # Ambil isi clipboard
-        isi_clipboard = ""
-        try:
-            from kivy.core.clipboard import Clipboard
-            isi_clipboard = Clipboard.paste()
-        except: return
+    # --- FUNGSI BARU: BACA CLIPBOARD ANTI-CRASH ---
+    def ambil_clipboard_aman(self):
+        if platform == 'android':
+            try:
+                # Menggunakan JNIUS langsung ke Android (Lebih Stabil)
+                from jnius import autoclass, cast
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                Context = autoclass('android.content.Context')
+                activity = PythonActivity.mActivity
+                clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE)
+                
+                # Cek apakah ada isinya
+                if clipboard.hasPrimaryClip():
+                    item = clipboard.getPrimaryClip().getItemAt(0)
+                    teks = item.getText()
+                    if teks:
+                        return teks.toString()
+            except Exception as e:
+                print(f"Clipboard Error: {e}")
+                return ""
+        else:
+            # Untuk Komputer
+            try:
+                from kivy.core.clipboard import Clipboard
+                return Clipboard.paste()
+            except: return ""
+        return ""
 
-        # Cek apakah link youtube & belum pernah diproses barusan
+    def cek_clipboard_otomatis(self, *args):
+        # Gunakan fungsi aman yang baru kita buat
+        isi_clipboard = self.ambil_clipboard_aman()
+
+        # Validasi Link
         if isi_clipboard and ("youtube.com" in isi_clipboard or "youtu.be" in isi_clipboard):
             if isi_clipboard != self.link_terakhir_di_cek:
                 self.link_terakhir_di_cek = isi_clipboard
-                self.input_link.text = isi_clipboard # Tempel di kolom input
-                self.tampilkan_pilihan_kualitas(isi_clipboard) # Langsung proses
+                self.input_link.text = isi_clipboard
+                # Munculkan status dulu
+                self.status_label.text = "Link Terdeteksi! Memproses..."
+                self.tampilkan_pilihan_kualitas(isi_clipboard)
 
     def cek_manual(self):
         link = self.input_link.text
@@ -138,8 +161,11 @@ class MainApp(MDApp):
         else:
             self.status_label.text = "Link tidak valid!"
 
-    # --- LOGIKA DOWNLOAD (Sama seperti sebelumnya) ---
+    # --- LOGIKA DOWNLOAD ---
     def tampilkan_pilihan_kualitas(self, url):
+        # Tutup dialog lama jika ada (mencegah tumpuk)
+        if self.loading_dialog: self.loading_dialog.dismiss()
+        
         self.loading_dialog = MDDialog(text="Menganalisis Link...")
         self.loading_dialog.open()
         threading.Thread(target=self.analisis_youtube, args=(url,)).start()
@@ -147,27 +173,24 @@ class MainApp(MDApp):
     def analisis_youtube(self, url):
         try:
             yt = YouTube(url)
-            # Cari stream
-            audio = yt.streams.filter(only_audio=True).first() # MP3 selalu ada
-            video = yt.streams.filter(res="720p", progressive=True).first() # 720p
-            
+            audio = yt.streams.filter(only_audio=True).first()
+            video = yt.streams.filter(res="720p", progressive=True).first()
             Clock.schedule_once(lambda x: self.buka_popup_pilihan(yt, video), 0)
         except Exception as e:
             Clock.schedule_once(lambda x: self.loading_dialog.dismiss(), 0)
-            Clock.schedule_once(lambda x: setattr(self.status_label, 'text', f"Gagal: {str(e)[:50]}"), 0)
+            Clock.schedule_once(lambda x: setattr(self.status_label, 'text', "Gagal Analisis. Coba Manual."), 0)
 
     def buka_popup_pilihan(self, yt, video_stream):
-        self.loading_dialog.dismiss()
+        if self.loading_dialog: self.loading_dialog.dismiss()
+        
         box = MDBoxLayout(orientation="vertical", spacing=10, size_hint_y=None, height=180)
         
-        # Tombol MP3
         box.add_widget(MDFillRoundFlatIconButton(
             text="DOWNLOAD MP3 (Musik)", icon="music-note",
             pos_hint={'center_x': 0.5}, size_hint_x=1,
             on_release=lambda x: self.mulai_download(yt, "mp3", None)
         ))
 
-        # Tombol Video (Jika ada)
         if video_stream:
             box.add_widget(MDFillRoundFlatIconButton(
                 text=f"DOWNLOAD VIDEO 720p ({video_stream.filesize_mb:.1f} MB)", icon="video",
@@ -185,17 +208,12 @@ class MainApp(MDApp):
         self.progress_bar = MDProgressBar(value=0)
         self.progress_dialog = MDDialog(title="Mendownload...", type="custom", content_cls=self.progress_bar)
         self.progress_dialog.open()
-        
         threading.Thread(target=self.eksekusi_download, args=(yt, tipe, stream_obj)).start()
 
     def eksekusi_download(self, yt, tipe, stream_obj):
         try:
-            if tipe == "mp3":
-                stream = yt.streams.filter(only_audio=True).first()
-            else:
-                stream = stream_obj # Pakai stream video yang dipilih tadi
+            stream = yt.streams.filter(only_audio=True).first() if tipe == "mp3" else stream_obj
 
-            # Callback Progress
             def on_progress(chunk, file_handle, bytes_remaining):
                 total = stream.filesize
                 now = total - bytes_remaining
@@ -205,7 +223,6 @@ class MainApp(MDApp):
             stream.on_progress = on_progress
             out_file = stream.download(output_path=PATH_DOWNLOAD)
 
-            # Rename jika MP3
             final_path = out_file
             if tipe == "mp3":
                 base, ext = os.path.splitext(out_file)
@@ -213,14 +230,13 @@ class MainApp(MDApp):
                 os.rename(out_file, new_file)
                 final_path = new_file
 
-            # Simpan Riwayat
             self.simpan_riwayat(yt.title, f"Sukses ({tipe})", final_path)
             Clock.schedule_once(lambda x: self.progress_dialog.dismiss(), 0)
             Clock.schedule_once(lambda x: setattr(self.status_label, 'text', "Download Selesai!"), 0)
 
         except Exception as e:
             Clock.schedule_once(lambda x: self.progress_dialog.dismiss(), 0)
-            Clock.schedule_once(lambda x: setattr(self.status_label, 'text', f"Error: {e}"), 0)
+            Clock.schedule_once(lambda x: setattr(self.status_label, 'text', "Gagal Download"), 0)
 
     def simpan_riwayat(self, judul, status, path):
         data_baru = {"judul": judul, "status": status, "file_path": path}
@@ -232,7 +248,6 @@ class MainApp(MDApp):
         list_data.append(data_baru)
         with open(FILE_RIWAYAT, 'w') as f: json.dump(list_data, f)
 
-    # --- FUNGSI RIWAYAT & PLAYER (SAMA) ---
     def muat_riwayat(self, dt):
         if not os.path.exists(FILE_RIWAYAT): return
         try:
