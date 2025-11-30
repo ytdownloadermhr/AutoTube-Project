@@ -18,22 +18,18 @@ from kivy.network.urlrequest import UrlRequest
 from pytube import YouTube
 
 # --- SETTING SERVER ---
-URL_CONFIG = "https://gist.githubusercontent.com/ytdownloadermhr/..." # Ganti Link Gist Anda
+URL_CONFIG = "https://gist.githubusercontent.com/ytdownloadermhr/..." # Pastikan ini Link Gist KAMU
 
-# --- FUNGSI PATH PINTAR (SOLUSI PERMISSION DENIED) ---
+# --- FUNGSI PATH (PENTING) ---
 def dapatkan_path_private():
-    # Ini mencari folder khusus aplikasi yang TIDAK BUTUH IZIN
     if platform == 'android':
         from jnius import autoclass
         PythonActivity = autoclass('org.kivy.android.PythonActivity')
-        # getExternalFilesDir(None) = /storage/emulated/0/Android/data/org.autotube.../files/
         return PythonActivity.mActivity.getExternalFilesDir(None).getAbsolutePath()
-    else:
-        return "." # Untuk di komputer
+    return "." 
 
-# Lokasi Penyimpanan
-PATH_DOWNLOAD = "/storage/emulated/0/Download" # Hasil MP3 tetap disini
-PATH_INTERNAL = dapatkan_path_private()        # Config pindah kesini (Aman)
+PATH_DOWNLOAD = "/storage/emulated/0/Download" 
+PATH_INTERNAL = dapatkan_path_private()        
 
 FILE_RIWAYAT = os.path.join(PATH_INTERNAL, "autotube_history.json")
 FILE_CONFIG = os.path.join(PATH_INTERNAL, "autotube_config.json")
@@ -55,21 +51,22 @@ class MainApp(MDApp):
         screen = MDScreen()
         layout = MDBoxLayout(orientation='vertical', spacing=10)
         
-        # UI Header
+        # Header
         header = MDCard(size_hint_y=None, height=60, elevation=2)
         header.add_widget(MDLabel(text="AutoTube Pro", halign="center", font_style="H5", theme_text_color="Primary"))
         layout.add_widget(header)
         
-        # Label Debug Error
-        self.error_label = MDLabel(
-            text="Siap", halign="center", theme_text_color="Custom",
-            text_color=(0,0,0,0.5), font_style="Caption", size_hint_y=None, height=30
+        # Label Status (Bersih, tidak menampilkan error panjang lagi)
+        self.status_label = MDLabel(
+            text="Siap Digunakan", 
+            halign="center", 
+            font_style="Subtitle1",
+            theme_text_color="Custom",
+            text_color=(0,0,0,0.7)
         )
-        layout.add_widget(self.error_label)
-
-        # Tombol Kontrol
+        
+        # Kontrol
         control_box = MDBoxLayout(orientation='vertical', adaptive_height=True, padding=20, spacing=15)
-        self.status_label = MDLabel(text="Pilih Mode:", halign="center", font_style="Subtitle1")
         
         btn_mp3 = MDFillRoundFlatIconButton(
             text="START AUTO MP3", icon="music-note", 
@@ -121,20 +118,20 @@ class MainApp(MDApp):
             UrlRequest(URL_CONFIG, on_success=self.update_config_server)
             Clock.schedule_interval(self.muat_riwayat, 2)
             Clock.schedule_interval(self.cek_antrean_video, 3)
-        except Exception as e:
-            self.error_label.text = f"Err Start: {str(e)}"
+        except: pass
 
     def update_config_server(self, req, result):
         if result.get('status') == 'aktif':
             self.ad_data = result
-            self.status_label.text = "Siap Digunakan."
 
+    # --- INI YANG KITA PERBAIKI (CARA LEBIH MUDAH) ---
     def set_mode_service(self, mode):
         try:
-            # Tulis ke folder internal (dijamin berhasil)
+            # 1. Simpan Config
             with open(FILE_CONFIG, 'w') as f:
                 json.dump({"mode": mode}, f)
             
+            # 2. Update Teks
             if mode == "mp3":
                 self.status_label.text = "🔥 AUTO MP3 AKTIF"
                 self.status_label.text_color = (0, 1, 0, 1)
@@ -142,23 +139,29 @@ class MainApp(MDApp):
                 self.status_label.text = "🎬 VIDEO MODE AKTIF"
                 self.status_label.text_color = (0, 0, 1, 1)
                 
+            # 3. NYALAKAN SERVICE (Cara Buildozer Native)
             if platform == 'android':
-                from jnius import autoclass
-                mActivity = autoclass('org.kivy.android.PythonActivity').mActivity
-                Intent = autoclass('android.content.Intent')
-                service_name = 'org.autotube.autotubepro.ServiceMService'
-                service = autoclass(service_name)
-                intent = Intent(mActivity, service)
-                intent.putExtra("python_service_argument", "somestring")
-                mActivity.startService(intent)
+                # Library sakti ini cuma ada di Android
+                from android import start_service
+                
+                # 'mService' adalah nama yang kita tulis di buildozer.spec
+                # arg='' adalah data tambahan (kita kosongkan saja)
+                start_service(title='mService', 
+                              description='AutoTube Background',
+                              arg='')
                 
         except Exception as e:
-            self.error_label.text = f"Gagal Service: {e}"
+            self.status_label.text = "Gagal Service"
+            print(f"Error: {e}")
 
     def stop_service(self, *args):
         self.status_label.text = "⛔ Service Berhenti"
         self.status_label.text_color = (0, 0, 0, 1)
+        if platform == 'android':
+             from android import stop_service
+             stop_service()
 
+    # --- FUNGSI LAIN TETAP SAMA ---
     def muat_riwayat(self, dt):
         if not os.path.exists(FILE_RIWAYAT): return
         try:
@@ -215,9 +218,8 @@ class MainApp(MDApp):
             res720 = streams.filter(res="720p").first()
             res360 = streams.filter(res="360p").first()
             Clock.schedule_once(lambda x: self.buka_popup_pilihan(yt, res720, res360), 0)
-        except Exception as e:
+        except:
             Clock.schedule_once(lambda x: self.loading_dialog.dismiss(), 0)
-            Clock.schedule_once(lambda x: setattr(self.error_label, 'text', f"Err YT: {str(e)}"), 0)
 
     def buka_popup_pilihan(self, yt, s720, s360):
         self.loading_dialog.dismiss()
@@ -253,15 +255,13 @@ class MainApp(MDApp):
             
             data_baru = {"judul": judul, "status": f"Selesai ({kualitas})", "file_path": file_path}
             list_data = []
-            # Cek riwayat di folder internal
             if os.path.exists(FILE_RIWAYAT):
                 with open(FILE_RIWAYAT, 'r') as f: list_data = json.load(f)
             list_data.append(data_baru)
             with open(FILE_RIWAYAT, 'w') as f: json.dump(list_data, f)
             Clock.schedule_once(lambda x: self.progress_dialog.dismiss(), 0)
-        except Exception as e:
+        except:
             Clock.schedule_once(lambda x: self.progress_dialog.dismiss(), 0)
-            Clock.schedule_once(lambda x: setattr(self.error_label, 'text', f"Err Down: {str(e)}"), 0)
 
 if __name__ == '__main__':
     MainApp().run()
