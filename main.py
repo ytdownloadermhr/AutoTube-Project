@@ -18,13 +18,26 @@ from kivy.network.urlrequest import UrlRequest
 from pytube import YouTube
 
 # --- SETTING SERVER ---
-URL_CONFIG = "https://gist.githubusercontent.com/ytdownloadermhr/..." # Pastikan ini link kamu
+URL_CONFIG = "https://gist.githubusercontent.com/ytdownloadermhr/..." # Ganti Link Gist Anda
 
-# --- KONFIGURASI FILE LOKAL ---
-PATH_DOWNLOAD = "/storage/emulated/0/Download"
-FILE_RIWAYAT = os.path.join(PATH_DOWNLOAD, "autotube_history.json")
-FILE_CONFIG = os.path.join(PATH_DOWNLOAD, "autotube_config.json")
-FILE_PENDING = os.path.join(PATH_DOWNLOAD, "autotube_pending.json")
+# --- FUNGSI PATH PINTAR (SOLUSI PERMISSION DENIED) ---
+def dapatkan_path_private():
+    # Ini mencari folder khusus aplikasi yang TIDAK BUTUH IZIN
+    if platform == 'android':
+        from jnius import autoclass
+        PythonActivity = autoclass('org.kivy.android.PythonActivity')
+        # getExternalFilesDir(None) = /storage/emulated/0/Android/data/org.autotube.../files/
+        return PythonActivity.mActivity.getExternalFilesDir(None).getAbsolutePath()
+    else:
+        return "." # Untuk di komputer
+
+# Lokasi Penyimpanan
+PATH_DOWNLOAD = "/storage/emulated/0/Download" # Hasil MP3 tetap disini
+PATH_INTERNAL = dapatkan_path_private()        # Config pindah kesini (Aman)
+
+FILE_RIWAYAT = os.path.join(PATH_INTERNAL, "autotube_history.json")
+FILE_CONFIG = os.path.join(PATH_INTERNAL, "autotube_config.json")
+FILE_PENDING = os.path.join(PATH_INTERNAL, "autotube_pending.json")
 
 class TombolHapus(IRightBodyTouch, MDIconButton):
     pass
@@ -42,24 +55,19 @@ class MainApp(MDApp):
         screen = MDScreen()
         layout = MDBoxLayout(orientation='vertical', spacing=10)
         
-        # 1. HEADER
+        # UI Header
         header = MDCard(size_hint_y=None, height=60, elevation=2)
         header.add_widget(MDLabel(text="AutoTube Pro", halign="center", font_style="H5", theme_text_color="Primary"))
         layout.add_widget(header)
         
-        # 2. LABEL ERROR (Untuk Debugging)
+        # Label Debug Error
         self.error_label = MDLabel(
-            text="Siap", 
-            halign="center", 
-            theme_text_color="Custom",
-            text_color=(0,0,0,0.5),
-            font_style="Caption",
-            size_hint_y=None,
-            height=30
+            text="Siap", halign="center", theme_text_color="Custom",
+            text_color=(0,0,0,0.5), font_style="Caption", size_hint_y=None, height=30
         )
         layout.add_widget(self.error_label)
 
-        # 3. TOMBOL KONTROL
+        # Tombol Kontrol
         control_box = MDBoxLayout(orientation='vertical', adaptive_height=True, padding=20, spacing=15)
         self.status_label = MDLabel(text="Pilih Mode:", halign="center", font_style="Subtitle1")
         
@@ -88,7 +96,7 @@ class MainApp(MDApp):
         control_box.add_widget(btn_stop)
         layout.add_widget(control_box)
 
-        # 4. RIWAYAT
+        # Riwayat
         layout.add_widget(MDLabel(text="  Riwayat Download:", size_hint_y=None, height=30))
         scroll = MDScrollView()
         self.history_list = MDList()
@@ -99,7 +107,6 @@ class MainApp(MDApp):
         return screen
 
     def on_start(self):
-        # Meminta Izin Android
         if platform == 'android':
             from android.permissions import request_permissions, Permission
             request_permissions([
@@ -122,14 +129,12 @@ class MainApp(MDApp):
             self.ad_data = result
             self.status_label.text = "Siap Digunakan."
 
-    # --- BAGIAN INI YANG KITA PERBAIKI (MENGGUNAKAN INTENT) ---
     def set_mode_service(self, mode):
         try:
-            # 1. Simpan Config Mode
+            # Tulis ke folder internal (dijamin berhasil)
             with open(FILE_CONFIG, 'w') as f:
                 json.dump({"mode": mode}, f)
             
-            # 2. Update Teks UI
             if mode == "mp3":
                 self.status_label.text = "🔥 AUTO MP3 AKTIF"
                 self.status_label.text_color = (0, 1, 0, 1)
@@ -137,43 +142,23 @@ class MainApp(MDApp):
                 self.status_label.text = "🎬 VIDEO MODE AKTIF"
                 self.status_label.text_color = (0, 0, 1, 1)
                 
-            # 3. Jalankan Service dengan INTENT (Cara Baru)
             if platform == 'android':
                 from jnius import autoclass
-                
-                # Mengambil Kelas Activity Utama
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                mActivity = PythonActivity.mActivity
+                mActivity = autoclass('org.kivy.android.PythonActivity').mActivity
                 Intent = autoclass('android.content.Intent')
-                
-                # Nama Paket Service (PENTING: Harus sesuai buildozer.spec)
-                # org.autotube + autotubepro + ServiceMService (Kivy menambahkan 'Service' + nama file kapital)
-                service_class_name = 'org.autotube.autotubepro.ServiceMService'
-                service_class = autoclass(service_class_name)
-                
-                # Membuat Intent untuk memulai service
-                intent = Intent(mActivity, service_class)
-                
-                # Menambahkan argumen (opsional)
+                service_name = 'org.autotube.autotubepro.ServiceMService'
+                service = autoclass(service_name)
+                intent = Intent(mActivity, service)
                 intent.putExtra("python_service_argument", "somestring")
-                
-                # Start Service (Foreground)
                 mActivity.startService(intent)
                 
-                self.error_label.text = "Service Berjalan..."
-                
         except Exception as e:
-            # Tampilkan detail error jika gagal lagi
             self.error_label.text = f"Gagal Service: {e}"
-            print(f"DEBUG ERROR: {e}")
 
     def stop_service(self, *args):
         self.status_label.text = "⛔ Service Berhenti"
         self.status_label.text_color = (0, 0, 0, 1)
-        # Di Android, mematikan service biasanya cukup dengan mematikan app dari recent apps
-        # atau kita bisa mengirim sinyal stop lewat file, tapi untuk sekarang UI saja cukup.
 
-    # --- FUNGSI PENDUKUNG LAIN (TETAP SAMA) ---
     def muat_riwayat(self, dt):
         if not os.path.exists(FILE_RIWAYAT): return
         try:
@@ -268,6 +253,7 @@ class MainApp(MDApp):
             
             data_baru = {"judul": judul, "status": f"Selesai ({kualitas})", "file_path": file_path}
             list_data = []
+            # Cek riwayat di folder internal
             if os.path.exists(FILE_RIWAYAT):
                 with open(FILE_RIWAYAT, 'r') as f: list_data = json.load(f)
             list_data.append(data_baru)
