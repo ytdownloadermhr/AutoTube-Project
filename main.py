@@ -1,8 +1,6 @@
 import json
 import os
 import threading
-import hashlib
-import sys
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
 from kivymd.uix.boxlayout import MDBoxLayout
@@ -19,9 +17,9 @@ from kivy.core.audio import SoundLoader
 from kivy.network.urlrequest import UrlRequest
 from pytube import YouTube
 
-# --- SETTING SERVER (GANTI INI!) ---
-# Tempel Link RAW dari GitHub Gist kamu di sini
-URL_CONFIG = "https://gist.githubusercontent.com/ytdownloadermhr/0a533aee303ca0e55acb3739ec950e61/raw/74caeebbbe5447c5f399fb9326d799608e708576/ad_config.json"
+# --- SETTING SERVER ---
+# Pastikan link ini benar (tetap pakai tanda kutip)
+URL_CONFIG = "https://gist.githubusercontent.com/ytdownloadermhr/..." 
 
 # --- KONFIGURASI FILE LOKAL ---
 PATH_DOWNLOAD = "/storage/emulated/0/Download"
@@ -37,7 +35,7 @@ class MainApp(MDApp):
     dialog_pilihan = None
     loading_dialog = None
     progress_dialog = None
-    ad_data = {} # Tempat nyimpen ID Iklan
+    ad_data = {} 
 
     def build(self):
         self.theme_cls.primary_palette = "Red"
@@ -50,15 +48,20 @@ class MainApp(MDApp):
         header.add_widget(MDLabel(text="AutoTube Pro", halign="center", font_style="H5", theme_text_color="Primary"))
         layout.add_widget(header)
         
-        # 2. BANNER IKLAN (Placeholder)
-        self.banner_box = MDCard(size_hint=(1, None), height=50, md_bg_color=(0.9, 0.9, 0.9, 1))
-        self.label_iklan = MDLabel(text="Memuat Iklan...", halign="center", theme_text_color="Hint")
-        self.banner_box.add_widget(self.label_iklan)
-        layout.add_widget(self.banner_box)
+        # 2. STATUS ERROR (Penting untuk Debugging)
+        self.error_label = MDLabel(
+            text="Memuat...", 
+            halign="center", 
+            theme_text_color="Error",
+            font_style="Caption",
+            size_hint_y=None,
+            height=30
+        )
+        layout.add_widget(self.error_label)
 
         # 3. TOMBOL KONTROL
         control_box = MDBoxLayout(orientation='vertical', adaptive_height=True, padding=20, spacing=15)
-        self.status_label = MDLabel(text="Hubungkan ke Internet...", halign="center", font_style="Subtitle1")
+        self.status_label = MDLabel(text="Menunggu Izin...", halign="center", font_style="Subtitle1")
         
         btn_mp3 = MDFillRoundFlatIconButton(
             text="START AUTO MP3", icon="music-note", 
@@ -94,44 +97,66 @@ class MainApp(MDApp):
 
         screen.add_widget(layout)
         
-        # SCHEDULE
-        Clock.schedule_interval(self.muat_riwayat, 2)
-        Clock.schedule_interval(self.cek_antrean_video, 3)
-        
         return screen
 
     def on_start(self):
-        # Saat aplikasi jalan, ambil data dari GitHub
-        UrlRequest(URL_CONFIG, on_success=self.update_config_server, on_failure=self.offline_mode, on_error=self.offline_mode)
+        # --- PERBAIKAN UTAMA: MEMINTA IZIN DI AWAL ---
+        if platform == 'android':
+            from android.permissions import request_permissions, Permission
+            request_permissions([
+                Permission.WRITE_EXTERNAL_STORAGE, 
+                Permission.READ_EXTERNAL_STORAGE,
+                Permission.FOREGROUND_SERVICE
+            ])
+            
+        # Panggil fungsi lain dengan delay agar tidak crash saat startup
+        Clock.schedule_once(self.mulai_aplikasi, 1)
+
+    def mulai_aplikasi(self, dt):
+        try:
+            # Ambil Config dari Server
+            UrlRequest(URL_CONFIG, on_success=self.update_config_server, on_failure=self.offline_mode, on_error=self.offline_mode)
+            
+            # Jalankan Scheduler
+            Clock.schedule_interval(self.muat_riwayat, 2)
+            Clock.schedule_interval(self.cek_antrean_video, 3)
+            self.error_label.text = "Sistem Normal"
+            
+        except Exception as e:
+            # Jika ada error, tampilkan di layar HP, JANGAN CRASH
+            self.error_label.text = f"Error: {str(e)}"
 
     def update_config_server(self, req, result):
-        if result.get('status') == 'aktif':
-            self.ad_data = result
-            self.label_iklan.text = "Iklan Aktif: " + result.get('banner_id')
-            self.status_label.text = "Siap Digunakan. Pilih Mode:"
-            # Disini nanti cek Signature (Keamanan)
-        else:
-            self.status_label.text = "Aplikasi Sedang Maintenance"
+        try:
+            if result.get('status') == 'aktif':
+                self.ad_data = result
+                self.status_label.text = "Siap Digunakan. Pilih Mode:"
+            else:
+                self.status_label.text = "Aplikasi Maintenance"
+        except:
+            self.status_label.text = "Gagal Baca Config"
 
     def offline_mode(self, *args):
-        self.status_label.text = "Mode Offline (Tanpa Iklan)"
+        self.status_label.text = "Mode Offline"
 
     def set_mode_service(self, mode):
-        # Simpan Config Lokal
-        with open(FILE_CONFIG, 'w') as f:
-            json.dump({"mode": mode}, f)
-        
-        if mode == "mp3":
-            self.status_label.text = "🔥 AUTO MP3 AKTIF"
-            self.status_label.text_color = (0, 1, 0, 1)
-        else:
-            self.status_label.text = "🎬 VIDEO MODE AKTIF"
-            self.status_label.text_color = (0, 0, 1, 1)
+        try:
+            with open(FILE_CONFIG, 'w') as f:
+                json.dump({"mode": mode}, f)
             
-        if platform == 'android':
-            from jnius import autoclass
-            service = autoclass('org.kivy.android.PythonService').mService
-            service.start(None, None, None, None, None)
+            if mode == "mp3":
+                self.status_label.text = "🔥 AUTO MP3 AKTIF"
+                self.status_label.text_color = (0, 1, 0, 1)
+            else:
+                self.status_label.text = "🎬 VIDEO MODE AKTIF"
+                self.status_label.text_color = (0, 0, 1, 1)
+                
+            if platform == 'android':
+                from jnius import autoclass
+                service = autoclass('org.kivy.android.PythonService').mService
+                service.start(None, None, None, None, None)
+        except Exception as e:
+            self.error_label.text = f"Gagal Start: {e}"
 
     def stop_service(self, *args):
         self.status_label.text = "⛔ Service Berhenti"
@@ -157,11 +182,12 @@ class MainApp(MDApp):
         except: pass
 
     def putar_musik(self, path):
-        if self.sound: self.sound.stop()
-        if path and os.path.exists(path):
-            self.sound = SoundLoader.load(path)
-            if self.sound: 
-                self.sound.play()
+        try:
+            if self.sound: self.sound.stop()
+            if path and os.path.exists(path):
+                self.sound = SoundLoader.load(path)
+                if self.sound: self.sound.play()
+        except: pass
 
     def hapus_file(self, index):
         try:
@@ -194,8 +220,10 @@ class MainApp(MDApp):
             res720 = streams.filter(res="720p").first()
             res360 = streams.filter(res="360p").first()
             Clock.schedule_once(lambda x: self.buka_popup_pilihan(yt, res720, res360), 0)
-        except:
+        except Exception as e:
             Clock.schedule_once(lambda x: self.loading_dialog.dismiss(), 0)
+            # Tampilkan error di label
+            Clock.schedule_once(lambda x: setattr(self.error_label, 'text', f"Err YT: {str(e)}"), 0)
 
     def buka_popup_pilihan(self, yt, s720, s360):
         self.loading_dialog.dismiss()
@@ -221,24 +249,27 @@ class MainApp(MDApp):
         threading.Thread(target=self.eksekusi_download, args=(stream, judul, kualitas)).start()
 
     def eksekusi_download(self, stream, judul, kualitas):
-        def on_progress(chunk, file_handle, bytes_remaining):
-            total_size = stream.filesize
-            bytes_downloaded = total_size - bytes_remaining
-            persen = (bytes_downloaded / total_size) * 100
-            Clock.schedule_once(lambda x: setattr(self.progress_bar, 'value', persen), 0)
+        try:
+            def on_progress(chunk, file_handle, bytes_remaining):
+                total_size = stream.filesize
+                bytes_downloaded = total_size - bytes_remaining
+                persen = (bytes_downloaded / total_size) * 100
+                Clock.schedule_once(lambda x: setattr(self.progress_bar, 'value', persen), 0)
 
-        stream.on_progress = on_progress
-        file_path = stream.download(output_path=PATH_DOWNLOAD)
-        
-        # Simpan Riwayat Manual
-        data_baru = {"judul": judul, "status": f"Selesai ({kualitas})", "file_path": file_path}
-        list_data = []
-        if os.path.exists(FILE_RIWAYAT):
-            with open(FILE_RIWAYAT, 'r') as f: list_data = json.load(f)
-        list_data.append(data_baru)
-        with open(FILE_RIWAYAT, 'w') as f: json.dump(list_data, f)
-        
-        Clock.schedule_once(lambda x: self.progress_dialog.dismiss(), 0)
+            stream.on_progress = on_progress
+            file_path = stream.download(output_path=PATH_DOWNLOAD)
+            
+            data_baru = {"judul": judul, "status": f"Selesai ({kualitas})", "file_path": file_path}
+            list_data = []
+            if os.path.exists(FILE_RIWAYAT):
+                with open(FILE_RIWAYAT, 'r') as f: list_data = json.load(f)
+            list_data.append(data_baru)
+            with open(FILE_RIWAYAT, 'w') as f: json.dump(list_data, f)
+            
+            Clock.schedule_once(lambda x: self.progress_dialog.dismiss(), 0)
+        except Exception as e:
+            Clock.schedule_once(lambda x: self.progress_dialog.dismiss(), 0)
+            Clock.schedule_once(lambda x: setattr(self.error_label, 'text', f"Err Down: {str(e)}"), 0)
 
 if __name__ == '__main__':
     MainApp().run()
