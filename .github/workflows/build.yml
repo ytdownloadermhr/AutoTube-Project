@@ -5,12 +5,12 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v2
 
-      # 1. Bersihkan Disk (Supaya muat)
+      # 1. Bersihkan Disk
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -21,25 +21,17 @@ jobs:
           large-packages: true
           swap-storage: true
 
-      # 2. Install Bumbu Dapur (Dependencies Linux)
-      - name: Install System Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libltdl-dev libffi-dev libssl-dev python3-dev git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake
-
-      # 3. Install Buildozer & Cython Khusus
-      - name: Install Buildozer & Cython
-        run: |
-          pip3 install --upgrade pip
-          pip3 install buildozer
-          pip3 install "cython<3.0.0"
-
-      # 4. Masak APK (Dengan perintah YES otomatis)
+      # 2. Masak Menggunakan DOCKER (Lebih Stabil)
+      # Kita gunakan Action resmi dari ArtemSBulgakov yang membungkus Buildozer
       - name: Build with Buildozer
-        run: |
-          yes | buildozer android debug
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          command: buildozer android debug
+          buildozer_version: stable
+          python_version: 3
 
-      # 5. Upload Hasilnya
+      # 3. Upload Hasil
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
