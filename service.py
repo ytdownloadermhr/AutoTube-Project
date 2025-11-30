@@ -5,12 +5,10 @@ from pytube import YouTube
 from jnius import autoclass
 from plyer import notification
 
-# --- FUNGSI PATH (AGAR SINKRON DENGAN MAIN APP) ---
+# Path
 def dapatkan_path_private():
-    # Service pakai 'PythonService', bukan 'PythonActivity'
     try:
         PythonService = autoclass('org.kivy.android.PythonService')
-        # getExternalFilesDir(None)
         return PythonService.mService.getExternalFilesDir(None).getAbsolutePath()
     except:
         return "." 
@@ -22,7 +20,6 @@ FILE_RIWAYAT = os.path.join(PATH_INTERNAL, "autotube_history.json")
 FILE_CONFIG = os.path.join(PATH_INTERNAL, "autotube_config.json")
 FILE_PENDING = os.path.join(PATH_INTERNAL, "autotube_pending.json")
 
-# Clipboard Android
 PythonService = autoclass('org.kivy.android.PythonService')
 Context = autoclass('android.content.Context')
 
@@ -77,7 +74,6 @@ if __name__ == '__main__':
                 link_terakhir = isi
                 
                 mode = "mp3"
-                # Baca config dari folder internal yang aman
                 if os.path.exists(FILE_CONFIG):
                     try:
                         with open(FILE_CONFIG, 'r') as f: 
