@@ -5,11 +5,22 @@ from pytube import YouTube
 from jnius import autoclass
 from plyer import notification
 
-# Path
+# --- FUNGSI PATH (AGAR SINKRON DENGAN MAIN APP) ---
+def dapatkan_path_private():
+    # Service pakai 'PythonService', bukan 'PythonActivity'
+    try:
+        PythonService = autoclass('org.kivy.android.PythonService')
+        # getExternalFilesDir(None)
+        return PythonService.mService.getExternalFilesDir(None).getAbsolutePath()
+    except:
+        return "." 
+
 PATH_DOWNLOAD = "/storage/emulated/0/Download"
-FILE_RIWAYAT = os.path.join(PATH_DOWNLOAD, "autotube_history.json")
-FILE_CONFIG = os.path.join(PATH_DOWNLOAD, "autotube_config.json")
-FILE_PENDING = os.path.join(PATH_DOWNLOAD, "autotube_pending.json")
+PATH_INTERNAL = dapatkan_path_private()
+
+FILE_RIWAYAT = os.path.join(PATH_INTERNAL, "autotube_history.json")
+FILE_CONFIG = os.path.join(PATH_INTERNAL, "autotube_config.json")
+FILE_PENDING = os.path.join(PATH_INTERNAL, "autotube_pending.json")
 
 # Clipboard Android
 PythonService = autoclass('org.kivy.android.PythonService')
@@ -37,19 +48,20 @@ def download_mp3_auto(url):
         new_file = base + '.mp3'
         os.rename(out_file, new_file)
         
-        # Simpan Riwayat
-        data = {"judul": yt.title, "status": "Selesai (MP3)", "file_path": new_file}
-        list_data = []
-        if os.path.exists(FILE_RIWAYAT):
-            try:
-                with open(FILE_RIWAYAT, 'r') as f: list_data = json.load(f)
-            except: pass
-        list_data.append(data)
-        with open(FILE_RIWAYAT, 'w') as f: json.dump(list_data, f)
-        
+        simpan_riwayat(yt.title, "Selesai (MP3)", new_file)
         notification.notify(title="SUKSES!", message=f"{yt.title}", app_name="AutoTube")
-    except:
-        notification.notify(title="Gagal", message="Cek Link/Koneksi", app_name="AutoTube")
+    except Exception as e:
+        notification.notify(title="Gagal", message=str(e)[:30], app_name="AutoTube")
+
+def simpan_riwayat(judul, status, path):
+    data_baru = {"judul": judul, "status": status, "file_path": path}
+    list_data = []
+    if os.path.exists(FILE_RIWAYAT):
+        try:
+            with open(FILE_RIWAYAT, 'r') as f: list_data = json.load(f)
+        except: pass
+    list_data.append(data_baru)
+    with open(FILE_RIWAYAT, 'w') as f: json.dump(list_data, f)
 
 def kirim_ke_antrean(url):
     with open(FILE_PENDING, 'w') as f:
@@ -65,6 +77,7 @@ if __name__ == '__main__':
                 link_terakhir = isi
                 
                 mode = "mp3"
+                # Baca config dari folder internal yang aman
                 if os.path.exists(FILE_CONFIG):
                     try:
                         with open(FILE_CONFIG, 'r') as f: 
