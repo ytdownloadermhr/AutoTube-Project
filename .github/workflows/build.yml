@@ -1,4 +1,3 @@
-          path: bin/*.apk
 name: Build Android APK
 on:
   push:
