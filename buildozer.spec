@@ -19,7 +19,7 @@ android.minapi = 21
 android.accept_sdk_license = True
 
 # Service Background
-services = mService:service.py
+# services = mService:service.py
 
 # KITA HAPUS BARIS 'p4a.branch' AGAR PAKAI VERSI STABIL
 
