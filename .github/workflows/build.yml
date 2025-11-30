@@ -21,15 +21,14 @@ jobs:
           large-packages: true
           swap-storage: true
 
-      # 2. Masak Menggunakan DOCKER (Lebih Stabil)
-      # Kita gunakan Action resmi dari ArtemSBulgakov yang membungkus Buildozer
+      # 2. Masak Menggunakan DOCKER
       - name: Build with Buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         id: buildozer
         with:
           command: buildozer android debug
           buildozer_version: stable
-          python_version: 3
+          # Baris python_version SUDAHDIHAPUS karena bikin error
 
       # 3. Upload Hasil
       - name: Upload APK
